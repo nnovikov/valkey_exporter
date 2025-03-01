@@ -1,0 +1,16 @@
+[package]
+name = "valkey_exporter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.96"
+env_logger = "0.11.6"
+http-body-util = "0.1.2"
+hyper = { version = "1.6.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.10", features = ["tokio"] }
+lazy_static = "1.5.0"
+log = "0.4.26"
+prometheus-client = "0.23.1"
+redis = { version = "0.29.0", features = ["tokio-comp"] }
+tokio = { version = "1.43.0", features = ["macros", "rt", "net"] }
