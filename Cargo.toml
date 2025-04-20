@@ -1,16 +1,33 @@
 [package]
 name = "valkey_exporter"
+description = "Simple prometheus exporter for Valkey"
 version = "0.1.0"
 edition = "2024"
+authors = ["Nickolay Novikov <hjkl@vk.com>"]
+license-file = "LICENSE"
 
 [dependencies]
-anyhow = "1.0.96"
-env_logger = "0.11.6"
-http-body-util = "0.1.2"
+anyhow = "1.0.98"
+clap = { version = "4.5.37", features = ["derive"] }
+env_logger = "0.11.8"
+http-body-util = "0.1.3"
 hyper = { version = "1.6.0", features = ["server", "http1"] }
-hyper-util = { version = "0.1.10", features = ["tokio"] }
-lazy_static = "1.5.0"
-log = "0.4.26"
+hyper-util = { version = "0.1.11", features = ["tokio"] }
+kameo = "0.16.0"
+knus = "3.2.0"
+miette = { version = "5.10", features = ["fancy"] }
 prometheus-client = "0.23.1"
-redis = { version = "0.29.0", features = ["tokio-comp"] }
-tokio = { version = "1.43.0", features = ["macros", "rt", "net"] }
+redis = { version = "0.29.5", features = ["tokio-comp", "tokio-rustls-comp"] }
+lazy_static = "1.5.0"
+log = "0.4.27"
+tokio = { version = "1.44.2", features = ["macros", "rt", "net"] }
+tokio-stream = "0.1.17"
+futures = "0.3.31"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[package.metadata.deb]
+maintainer = "Nickolay Novikov <hjkl@vk.com>"
+assets = [["target/release/valkey_exporter", "/usr/bin/valkey_exporter", "755"]]

@@ -1,7 +1,12 @@
 use core::sync::atomic::AtomicU64;
+use kameo::Actor;
+use kameo::message::{Context, Message};
 use lazy_static::lazy_static;
+use log::info;
 use prometheus_client::encoding::text::encode;
+use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
+use prometheus_client::metrics::info::Info;
 use prometheus_client::registry::Registry;
 use redis::InfoDict;
 use std::collections::HashMap;
@@ -140,19 +145,28 @@ use std::collections::hash_map::Entry;
 // "repl_backlog_size": simple-string("1048576")
 // "reply_buffer_expands": simple-string("0")
 // "reply_buffer_shrinks": simple-string("44")
+//
 // "role": simple-string("master")
+//
 // "rss_overhead_bytes": simple-string("-1310720")
 // "rss_overhead_ratio": simple-string("0.88")
+//
 // "run_id": simple-string("ee997ade2683f5d868ef19764815026bab40821f")
+//
 // "second_repl_offset": simple-string("-1")
+//
 // "server_name": simple-string("valkey")
 // "server_time_usec": simple-string("1740692794192456")
 // "server_time_usec": simple-string("1740692794192851")
+//
 // "slave_expires_tracked_keys": simple-string("0")
+//
 // "sync_full": simple-string("0")
 // "sync_partial_err": simple-string("0")
 // "sync_partial_ok": simple-string("0")
+//
 // "tcp_port": simple-string("6379")
+//
 // "total_active_defrag_time": simple-string("0")
 // "total_blocking_keys": simple-string("0")
 // "total_blocking_keys_on_nokey": simple-string("0")
@@ -167,28 +181,15 @@ use std::collections::hash_map::Entry;
 // "total_net_output_bytes": simple-string("235333")
 // "total_net_repl_input_bytes": simple-string("0")
 // "total_net_repl_output_bytes": simple-string("0")
-// "total_reads_processed": simple-string("91")
 // "total_reads_processed": simple-string("92")
 // "total_system_memory": simple-string("2043928576")
-// "total_system_memory_human": simple-string("1.90G")
 // "total_writes_processed": simple-string("90")
+//
 // "tracking_clients": simple-string("0")
 // "tracking_total_items": simple-string("0")
 // "tracking_total_keys": simple-string("0")
 // "tracking_total_prefixes": simple-string("0")
 // "unexpected_error_replies": simple-string("0")
-// "uptime_in_days": simple-string("1")
-// "uptime_in_seconds": simple-string("97555")
-//
-// "used_cpu_sys": simple-string("151.185961")
-// "used_cpu_sys_children": simple-string("0.000491")
-// "used_cpu_sys_main_thread": simple-string("151.185210")
-// "used_cpu_sys_main_thread": simple-string("151.185238")
-// "used_cpu_user": simple-string("97.857111")
-// "used_cpu_user": simple-string("97.857156")
-// "used_cpu_user_children": simple-string("0.001158")
-// "used_cpu_user_main_thread": simple-string("97.856607")
-// "used_cpu_user_main_thread": simple-string("97.856625")
 //
 //
 // "valkey_version": simple-string("7.2.8")
@@ -196,7 +197,7 @@ use std::collections::hash_map::Entry;
 enum MetricKind {
     GaugeI64,
     GaugeF64,
-    Counter,
+    Info,
 }
 
 struct MetricDesc {
@@ -218,7 +219,11 @@ macro_rules! metric_desc {
 lazy_static! {
     static ref METRICS_DESC: Vec<MetricDesc> = {
         vec![
+            // Info
+            metric_desc!(Info, valkey_version, "valkey_version"),
             // GaugeI64
+            metric_desc!(GaugeI64, uptime_in_days, "uptime_in_days"),
+            metric_desc!(GaugeI64, uptime_in_seconds, "uptime_in_seconds"),
             metric_desc!(GaugeI64, used_memory, "used_memory"),
             metric_desc!(GaugeI64, used_memory_dataset, "used_memory_dataset"),
             metric_desc!(GaugeI64, used_memory_functions, "used_memory_functions"),
@@ -255,28 +260,72 @@ lazy_static! {
     };
 }
 
-#[derive(Debug, Default)]
+type FamilyGaugeI64 = Family<Vec<(String, String)>, Gauge>;
+type FamilyGaugeF64 = Family<Vec<(String, String)>, Gauge<f64, AtomicU64>>;
+
+#[derive(Debug, Default, Actor)]
 pub struct Metrics {
     registry: Registry,
-    gauge_i64: HashMap<String, Gauge>,
-    gauge_f64: HashMap<String, Gauge<f64, AtomicU64>>,
+    gauge_i64: HashMap<String, FamilyGaugeI64>,
+    gauge_f64: HashMap<String, FamilyGaugeF64>,
+    info: Vec<String>,
 }
 
 impl Metrics {
-    pub fn update(&mut self, info: &InfoDict) {
+    pub fn with_prefix(prefix: &str) -> Self {
+        let registry = Registry::with_prefix(prefix);
+
+        Metrics {
+            registry,
+            ..Default::default()
+        }
+    }
+
+    pub fn update_up(&mut self, up: bool, inst: &str) {
+        info!("Update up {} for inst:{}", up, inst);
+
+        let v = if up { 1 } else { 0 };
+
+        match self.gauge_i64.entry("up".to_string()) {
+            // create mteric and add to registry
+            Entry::Vacant(e) => {
+                let family = Family::<Vec<(String, String)>, Gauge>::default();
+                let labels = vec![("inst".to_string(), inst.to_string())];
+                family.get_or_create(&labels).set(v);
+                self.registry.register("up", "up", family.clone());
+                e.insert(family);
+            }
+            // update existed metric
+            Entry::Occupied(mut e) => {
+                e.get_mut()
+                    .get_or_create(&vec![("inst".to_string(), inst.to_string())])
+                    .set(v);
+            }
+        };
+    }
+
+    pub fn update_info(&mut self, info: &InfoDict, inst: &str) {
+        let inst = inst.to_string();
+
         for x in METRICS_DESC.iter() {
             match x.kind {
                 MetricKind::GaugeI64 => {
+                    // if metric exist in info
                     if let Some(v) = info.get(x.name) {
                         match self.gauge_i64.entry(x.name.to_string()) {
+                            // create mteric and add to registry
                             Entry::Vacant(e) => {
-                                let gauge = Gauge::default();
-                                gauge.set(v);
-                                self.registry.register(x.name, x.descr, gauge.clone());
-                                e.insert(gauge);
+                                let family = Family::<Vec<(String, String)>, Gauge>::default();
+                                let labels = vec![("inst".into(), inst.clone())];
+                                family.get_or_create(&labels).set(v);
+                                self.registry.register(x.name, x.descr, family.clone());
+                                e.insert(family);
                             }
+                            // update existed metric
                             Entry::Occupied(mut e) => {
-                                e.get_mut().set(v);
+                                e.get_mut()
+                                    .get_or_create(&vec![("inst".into(), inst.clone())])
+                                    .set(v);
                             }
                         };
                     };
@@ -285,25 +334,71 @@ impl Metrics {
                     if let Some(v) = info.get(x.name) {
                         match self.gauge_f64.entry(x.name.to_string()) {
                             Entry::Vacant(e) => {
-                                let gauge = Gauge::default();
-                                gauge.set(v);
-                                self.registry.register(x.name, x.descr, gauge.clone());
-                                e.insert(gauge);
+                                let family =
+                                    Family::<Vec<(String, String)>, Gauge<f64, AtomicU64>>::default(
+                                    );
+                                let labels = vec![("inst".into(), inst.clone())];
+                                family.get_or_create(&labels).set(v);
+                                self.registry.register(x.name, x.descr, family.clone());
+                                e.insert(family);
                             }
                             Entry::Occupied(mut e) => {
-                                e.get_mut().set(v);
+                                e.get_mut()
+                                    .get_or_create(&vec![("inst".into(), inst.clone())])
+                                    .set(v);
                             }
                         };
                     };
                 }
-                MetricKind::Counter => {
-                    unimplemented!()
+                MetricKind::Info => {
+                    if let Some(v) = info.get::<String>(x.name) {
+                        if !self.info.contains(&x.name.to_string()) {
+                            let info = Info::new(vec![(x.name.to_string(), v)]);
+                            self.registry.register(x.name, x.descr, info);
+                            self.info.push(x.name.to_string());
+                        }
+                    };
                 }
             }
         }
     }
+}
 
-    pub fn encode(&self, buf: &mut String) {
-        encode(buf, &self.registry).unwrap();
+pub struct Encode {}
+
+impl Message<Encode> for Metrics {
+    type Reply = String;
+
+    async fn handle(&mut self, _msg: Encode, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // self.encode()
+        let mut buffer = String::new();
+        let _ = encode(&mut buffer, &self.registry);
+        buffer
+    }
+}
+
+pub struct UpdateInfo {
+    pub info: Option<InfoDict>,
+    pub inst: String,
+}
+
+impl Message<UpdateInfo> for Metrics {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: UpdateInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        info!(">>> UpdateInfo for {}", msg.inst);
+        match msg.info {
+            Some(info) => {
+                self.update_up(true, &msg.inst);
+                self.update_info(&info, &msg.inst);
+            }
+            None => {
+                self.update_up(false, &msg.inst);
+            }
+        }
     }
 }
