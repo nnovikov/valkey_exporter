@@ -1,0 +1,18 @@
+options {
+  // debug
+  listen "0.0.0.0:8888"
+  metric-prefix "valkey"
+}
+
+redis "foo" {
+  host "192.168.3.41"
+  port 6379
+  poll-interval 30
+}
+
+redis "bar" {
+  host "valkey"
+  port 6380
+  poll-interval 13
+  tls
+}
