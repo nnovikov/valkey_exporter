@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.2.0 - 2025-04-20
+#### Bug Fixes
+- fix cog.toml - (cc6790e) - Nickolay Novikov
+#### Features
+- add tls support - (a604028) - Nickolay Novikov
+
+- - -
+
 ## 0.1.0 - 2025-03-01
 #### Miscellaneous Chores
 - first commit - (e5922cb) - Nickolay Novikov
