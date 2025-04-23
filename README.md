@@ -1,10 +1,4 @@
-# valkey_exporter
+# Prometheus Valkey metrics exporter
 
-Valkey metrics exporter.
-
-## TODO
-
-- [ ] Add user/pass
-- [ ] Add TLS
-- [ ] Add up metrics 
-- [ ] Add connection retry/timeout
+Valkey metrics exporter written in Rust. Outputs several metrics received from the INFO command.
+An example of the configuration can be found in the file [example.kdl](./example.kdl).
